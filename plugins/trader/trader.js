@@ -5,7 +5,9 @@ const dirs = util.dirs();
 const moment = require('moment');
 
 const log = require(dirs.core + 'log');
-const Broker = require(dirs.gekko + '/exchange/gekkoBroker');
+const Broker = require(dirs.broker + '/gekkoBroker');
+
+require(dirs.gekko + '/exchange/dependencyCheck');
 
 const Trader = function(next) {
 
@@ -18,15 +20,19 @@ const Trader = function(next) {
   }
 
   this.propogatedTrades = 0;
+  this.propogatedTriggers = 0;
 
-  this.broker = new Broker(this.brokerConfig);
+  try {
+    this.broker = new Broker(this.brokerConfig);
+  } catch(e) {
+    util.die(e.message);
+  }
 
   if(!this.broker.capabilities.gekkoBroker) {
     util.die('This exchange is not yet supported');
   }
 
   this.sync(() => {
-    this.setBalance();
     log.info('\t', 'Portfolio:');
     log.info('\t\t', this.portfolio.currency, this.brokerConfig.currency);
     log.info('\t\t', this.portfolio.asset, this.brokerConfig.asset);
@@ -59,6 +65,7 @@ Trader.prototype.sync = function(next) {
     const oldPortfolio = this.portfolio;
 
     this.setPortfolio();
+    this.setBalance();
 
     if(this.sendInitialPortfolio && !_.isEqual(oldPortfolio, this.portfolio)) {
       this.relayPortfolioChange();
@@ -196,7 +203,19 @@ Trader.prototype.processAdvice = function(advice) {
       });
     }
 
-    amount = this.portfolio.asset * 0.95;
+    // clean up potential old stop trigger
+    if(this.activeStopTrigger) {
+      this.deferredEmit('triggerAborted', {
+        id: this.activeStopTrigger.id,
+        date: advice.date
+      });
+
+      this.activeStopTrigger.instance.cancel();
+
+      delete this.activeStopTrigger;
+    }
+
+    amount = this.portfolio.asset;
 
     log.info(
       'Trader',
@@ -219,7 +238,7 @@ Trader.prototype.createOrder = function(side, amount, advice, id) {
   const check = this.broker.isValidOrder(amount, this.price);
 
   if(!check.valid) {
-    log.debug('NOT creating order! Reason:', check.reason);
+    log.warn('NOT creating order! Reason:', check.reason);
     return this.deferredEmit('tradeAborted', {
       id,
       adviceId: advice.id,
@@ -242,7 +261,7 @@ Trader.prototype.createOrder = function(side, amount, advice, id) {
 
   this.order = this.broker.createOrder(type, side, amount);
 
-  this.order.on('filled', f => log.info('[ORDER] partial', side, ' fill, total filled:', f));
+  this.order.on('fill', f => log.info('[ORDER] partial', side, 'fill, total filled:', f));
   this.order.on('statusChange', s => log.debug('[ORDER] statusChange:', s));
 
   this.order.on('error', e => {
@@ -261,6 +280,20 @@ Trader.prototype.createOrder = function(side, amount, advice, id) {
   });
   this.order.on('completed', () => {
     this.order.createSummary((err, summary) => {
+      if(!err && !summary) {
+        err = new Error('GB returned an empty summary.')
+      }
+
+      if(err) {
+        log.error('Error while creating summary:', err);
+        return this.deferredEmit('tradeErrored', {
+          id,
+          adviceId: advice.id,
+          date: moment(),
+          reason: err.message
+        });
+      }
+
       log.info('[ORDER] summary:', summary);
       this.order = null;
       this.sync(() => {
@@ -278,7 +311,7 @@ Trader.prototype.createOrder = function(side, amount, advice, id) {
             effectivePrice = summary.price * (1 - summary.feePercent / 100);
           }
         } else {
-          log.debug('WARNING: exchange did not provide fee information, assuming no fees..');
+          log.warn('WARNING: exchange did not provide fee information, assuming no fees..');
           effectivePrice = summary.price;
         }
 
@@ -295,9 +328,63 @@ Trader.prototype.createOrder = function(side, amount, advice, id) {
           feePercent: summary.feePercent,
           effectivePrice
         });
+
+        if(
+          side === 'buy' &&
+          advice.trigger &&
+          advice.trigger.type === 'trailingStop'
+        ) {
+          const trigger = advice.trigger;
+          const triggerId = 'trigger-' + (++this.propogatedTriggers);
+
+          this.deferredEmit('triggerCreated', {
+            id: triggerId,
+            at: advice.date,
+            type: 'trialingStop',
+            properties: {
+              trail: trigger.trailValue,
+              initialPrice: summary.price,
+            }
+          });
+
+          log.info(`Creating trailingStop trigger "${triggerId}"! Properties:`);
+          log.info(`\tInitial price: ${summary.price}`);
+          log.info(`\tTrail of: ${trigger.trailValue}`);
+
+          this.activeStopTrigger = {
+            id: triggerId,
+            adviceId: advice.id,
+            instance: this.broker.createTrigger({
+              type: 'trailingStop',
+              onTrigger: this.onStopTrigger,
+              props: {
+                trail: trigger.trailValue,
+                initialPrice: summary.price,
+              }
+            })
+          }
+        }
       });
     })
   });
+}
+
+Trader.prototype.onStopTrigger = function(price) {
+  log.info(`TrailingStop trigger "${this.activeStopTrigger.id}" fired! Observed price was ${price}`);
+
+  this.deferredEmit('triggerFired', {
+    id: this.activeStopTrigger.id,
+    date: moment()
+  });
+
+  const adviceMock = {
+    recommendation: 'short',
+    id: this.activeStopTrigger.adviceId
+  }
+
+  delete this.activeStopTrigger;
+
+  this.processAdvice(adviceMock);
 }
 
 Trader.prototype.cancelOrder = function(id, advice, next) {

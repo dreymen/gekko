@@ -1,4 +1,4 @@
-const Poloniex = require("poloniex.js");
+const Poloniex = require("gekko-broker-poloniex");
 const _ = require('lodash');
 const moment = require('moment');
 const retry = require('../exchangeUtils').retry;
@@ -18,7 +18,11 @@ const Trader = function(config) {
 
   this.pair = this.currency + '_' + this.asset;
 
-  this.poloniex = new Poloniex(this.key, this.secret);
+  this.poloniex = new Poloniex({
+    key: this.key,
+    secret: this.secret,
+    userAgent: 'Gekko Broker v' + require('../package.json').version
+  });
 }
 
 const recoverableErrors = [
@@ -33,11 +37,15 @@ const recoverableErrors = [
   '503',
   '500',
   '502',
+  'socket hang up',
   'Empty response',
   'Please try again in a few minutes.',
   'Nonce must be greater than',
   'Internal error. Please try again.',
-  'Connection timed out. Please try again.'
+  'Connection timed out. Please try again.',
+  // getaddrinfo EAI_AGAIN poloniex.com poloniex.com:443
+  'EAI_AGAIN',
+  'ENETUNREACH'
 ];
 
 // errors that might mean
@@ -115,7 +123,7 @@ Trader.prototype.processResponse = function(next, fn, payload) {
         // it might be cancelled
         else if(includes(error.message, unknownResultErrors)) {
           setTimeout(() => {
-            this.getOpenOrders((err, orders) => {
+            this.getRawOpenOrders((err, orders) => {
               if(err) {
                 return next(err);
               }
@@ -131,25 +139,25 @@ Trader.prototype.processResponse = function(next, fn, payload) {
               // it was cancelled, we need to check filled amount..
               console.log(new Date, '[CANCELFIX] process cancel response');
               console.log('[CANCELFIX] rechecking fill')
-              setTimeout(this.getOrder((error, order) => {
-                if(error) {
-                  return next(error)
-                }
+              setTimeout(() => {
+                this.getOrder(payload, (error, order) => {
+                  if(error) {
+                    return next(error)
+                  }
 
-                console.log('[CANCELFIX] checked, got:', order);
+                  console.log('[CANCELFIX] checked, got:', order);
 
-                return next(undefined, { filled: order.amount });
-
-              }), this.checkInterval);
+                  return next(undefined, { filled: order.amount });
+                });
+              }, this.checkInterval);
             });
+
           }, this.checkInterval);
           return;
         }
       }
 
       if(fn === 'order') {
-        console.log('order', error.message);
-
         if(includes(error.message, ['Not enough'])) {
           error.retry = 2;
         }
@@ -197,12 +205,24 @@ Trader.prototype.findLastOrder = function(since, side, callback) {
     callback(undefined, order);
   };
 
-  this.getOpenOrders(handle);
+  this.getRawOpenOrders(handle);
+}
+
+Trader.prototype.getRawOpenOrders = function(callback) {
+  const fetch = next => this.poloniex.returnOpenOrders(this.currency, this.asset, this.processResponse(next));
+  retry(null, fetch, callback);
 }
 
 Trader.prototype.getOpenOrders = function(callback) {
-  const fetch = next => this.poloniex.returnOpenOrders(this.currency, this.asset, this.processResponse(next));
-  retry(null, fetch, callback);
+  this.getRawOpenOrders((err, orders) => {
+    if(err) {
+      return callback(err);
+    }
+
+    const ids = orders.map(o => o.orderNumber);
+
+    return callback(undefined, ids);
+  })
 }
 
 Trader.prototype.getPortfolio = function(callback) {
@@ -367,8 +387,6 @@ Trader.prototype.cancelOrder = function(order, callback) {
     if(err) {
       return callback(err);
     }
-
-    console.log(new Date, 'cancel', result.amount);
 
     if(result.filled) {
       return callback(undefined, true);

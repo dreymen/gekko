@@ -10,7 +10,9 @@ const Binance = require('binance');
 const Trader = function(config) {
   _.bindAll(this, [
     'roundAmount',
-    'roundPrice'
+    'roundPrice',
+    'isValidPrice',
+    'isValidLot'
   ]);
 
   if (_.isObject(config)) {
@@ -20,6 +22,18 @@ const Trader = function(config) {
     this.asset = config.asset.toUpperCase();
   }
 
+  let recvWindow = 6000;
+  if(config.optimizedConnection) {
+    // there is a bug in binance's API
+    // where some requests randomly take
+    // over a second, this tells binance
+    // to bail out after 500ms.
+    //
+    // As discussed in binance API
+    // telegram. TODO add link.
+    recvWindow = 500;
+  }
+
   this.pair = this.asset + this.currency;
   this.name = 'binance';
 
@@ -27,26 +41,32 @@ const Trader = function(config) {
     return market.pair[0] === this.currency && market.pair[1] === this.asset
   });
 
-  // Note non standard func:
-  //
-  // On binance we might pay fees in BNB
-  // if we do we CANNOT calculate feePercent
-  // since we don't track BNB price (when we
-  // are not trading on a BNB market).
-  //
-  // Though we can deduce feePercent based
-  // on user fee tracked through `this.getFee`.
-  // Set default here, overwrite in getFee.
-  this.fee = 0.1 / 100;
-
   this.binance = new Binance.BinanceRest({
     key: this.key,
     secret: this.secret,
     timeout: 15000,
-    recvWindow: 60000, // suggested by binance
+    recvWindow,
     disableBeautification: false,
     handleDrift: true,
   });
+
+  if(config.key && config.secret) {
+    // Note non standard func:
+    //
+    // On binance we might pay fees in BNB
+    // if we do we CANNOT calculate feePercent
+    // since we don't track BNB price (when we
+    // are not trading on a BNB market).
+    //
+    // Though we can deduce feePercent based
+    // on user fee tracked through `this.getFee`.
+    // Set default here, overwrite in getFee.
+    this.fee = 0.1;
+    // Set the proper fee asap.
+    this.getFee(_.noop);
+
+    this.oldOrder = false;
+  }
 };
 
 const recoverableErrors = [
@@ -58,7 +78,12 @@ const recoverableErrors = [
   'Error -1021',
   'Response code 429',
   'Response code 5',
-  'ETIMEDOUT'
+  'Response code 403',
+  'ETIMEDOUT',
+  'EHOSTUNREACH',
+  // getaddrinfo EAI_AGAIN api.binance.com api.binance.com:443
+  'EAI_AGAIN',
+  'ENETUNREACH'
 ];
 
 const includes = (str, list) => {
@@ -93,6 +118,10 @@ Trader.prototype.handleResponse = function(funcName, callback) {
         // order got filled in full before it could be
         // cancelled, meaning it was NOT cancelled.
         return callback(false, {filled: true});
+      }
+
+      if(funcName === 'addOrder' && error.message.includes('Account has insufficient balance')) {
+        error.type = 'insufficientFunds';
       }
 
       return callback(error);
@@ -279,6 +308,7 @@ Trader.prototype.isValidPrice = function(price) {
 }
 
 Trader.prototype.isValidLot = function(price, amount) {
+  console.log('isValidLot', this.market.minimalOrder.order, amount * price >= this.market.minimalOrder.order)
   return amount * price >= this.market.minimalOrder.order;
 }
 
@@ -437,7 +467,12 @@ Trader.prototype.checkOrder = function(order, callback) {
 Trader.prototype.cancelOrder = function(order, callback) {
 
   const cancel = (err, data) => {
+
+    this.oldOrder = order;
+
     if(err) {
+      if(err.message.contains(''))
+
       return callback(err);
     }
 
@@ -469,7 +504,8 @@ Trader.getCapabilities = function() {
     providesFullHistory: true,
     tid: 'tid',
     tradable: true,
-    gekkoBroker: 0.6
+    gekkoBroker: 0.6,
+    limitedCancelConfirmation: true
   };
 };
 
