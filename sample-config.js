@@ -19,11 +19,6 @@ config.watch = {
   exchange: 'binance',
   currency: 'USDT',
   asset: 'BTC',
-
-  // You can set your own tickrate (refresh rate).
-  // If you don't set it, the defaults are 2 sec for
-  // okcoin and 20 sec for all other exchanges.
-  // tickrate: 20
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -112,12 +107,19 @@ config.pushover = {
   user: ''
 }
 
+config.blotter = {
+  enabled: false,
+  filename: 'blotter.csv',
+  dateFormat: 'l LT',
+  timezone: -300, // -300 minutes for EST(-5:00), only used if exchange doesn't provide correct timezone
+}
+
 // want Gekko to send a mail on buy or sell advice?
 config.mailer = {
-  enabled: false,       // Send Emails if true, false to turn off
-  sendMailOnStart: true,    // Send 'Gekko starting' message if true, not if false
+  enabled: false, // Send Emails if true, false to turn off
+  sendMailOnStart: true, // Send 'Gekko starting' message if true, not if false
 
-  email: '',    // Your Gmail address
+  email: '', // Your Gmail address
   muteSoft: true, // disable advice printout if it's soft
 
   // You don't have to set your password here, if you leave it blank we will ask it
@@ -130,22 +132,22 @@ config.mailer = {
   // WARNING: If you have NOT downloaded Gekko from the github page above we CANNOT
   // guarantuee that your email address & password are safe!
 
-  password: '',       // Your Gmail Password - if not supplied Gekko will prompt on startup.
+  password: '', // Your Gmail Password - if not supplied Gekko will prompt on startup.
 
-  tag: '[GEKKO] ',      // Prefix all email subject lines with this
+  tag: '[GEKKO] ', // Prefix all email subject lines with this
 
-            //       ADVANCED MAIL SETTINGS
-            // you can leave those as is if you
-            // just want to use Gmail
+  //       ADVANCED MAIL SETTINGS
+  // you can leave those as is if you
+  // just want to use Gmail
 
-  server: 'smtp.gmail.com',   // The name of YOUR outbound (SMTP) mail server.
-  smtpauth: true,     // Does SMTP server require authentication (true for Gmail)
-          // The following 3 values default to the Email (above) if left blank
-  user: '',       // Your Email server user name - usually your full Email address 'me@mydomain.com'
-  from: '',       // 'me@mydomain.com'
-  to: '',       // 'me@somedomain.com, me@someotherdomain.com'
-  ssl: true,        // Use SSL (true for Gmail)
-  port: '',       // Set if you don't want to use the default port
+  server: 'smtp.gmail.com', // The name of YOUR outbound (SMTP) mail server.
+  smtpauth: true, // Does SMTP server require authentication (true for Gmail)
+  // The following 3 values default to the Email (above) if left blank
+  user: '', // Your Email server user name - usually your full Email address 'me@mydomain.com'
+  from: '', // 'me@mydomain.com'
+  to: '', // 'me@somedomain.com, me@someotherdomain.com'
+  ssl: true, // Use SSL (true for Gmail)
+  port: '', // Set if you don't want to use the default port
 }
 
 config.pushbullet = {
@@ -153,12 +155,12 @@ config.pushbullet = {
   enabled: false,
   // Send 'Gekko starting' message if true
   sendMessageOnStart: true,
-  // Send Message for advice?
+  // Send Message for advice? Recommend Flase for paper, true for live
   sendOnAdvice: true,
   // Send Message on Trade Completion?
   sendOnTrade: true,
-  // disable advice printout if it's soft
-  muteSoft: true,
+  // For Overall P/L calc. Pass in old balance if desired, else leave '0'
+  startingBalance: 0,
   // your pushbullet API key
   key: '',
   // your email
@@ -192,20 +194,20 @@ config.telegrambot = {
 };
 
 config.twitter = {
-    // sends pushbullets if true
+  // sends pushbullets if true
   enabled: false,
-    // Send 'Gekko starting' message if true
+  // Send 'Gekko starting' message if true
   sendMessageOnStart: false,
-    // disable advice printout if it's soft
+  // disable advice printout if it's soft
   muteSoft: false,
   tag: '[GEKKO]',
-    // twitter consumer key
+  // twitter consumer key
   consumer_key: '',
-    // twitter consumer secret
+  // twitter consumer secret
   consumer_secret: '',
-    // twitter access token key
+  // twitter access token key
   access_token_key: '',
-    // twitter access token secret
+  // twitter access token secret
   access_token_secret: ''
 };
 
@@ -233,11 +235,11 @@ config.redisBeacon = {
   enabled: false,
   port: 6379, // redis default
   host: '127.0.0.1', // localhost
-    // On default Gekko broadcasts
-    // events in the channel with
-    // the name of the event, set
-    // an optional prefix to the
-    // channel name.
+  // On default Gekko broadcasts
+  // events in the channel with
+  // the name of the event, set
+  // an optional prefix to the
+  // channel name.
   channelPrefix: '',
   broadcast: [
     'candle'
@@ -281,6 +283,12 @@ config.backtestResultExporter = {
   }
 }
 
+config.candleUploader = {
+  enabled: false,
+  url: '',
+  apiKey: ''
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //                       CONFIGURING ADAPTER
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -298,7 +306,7 @@ config.sqlite = {
   dependencies: []
 }
 
-  // Postgres adapter example config (please note: requires postgres >= 9.5):
+// Postgres adapter example config (please note: requires postgres >= 9.5):
 config.postgresql = {
   path: 'plugins/postgresql',
   version: 0.1,
@@ -322,6 +330,12 @@ config.mongodb = {
   }]
 }
 
+config.candleUploader = {
+  enabled: false,
+  url: '',
+  apiKey: ''
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //                       CONFIGURING BACKTESTING
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -331,10 +345,10 @@ config.mongodb = {
 
 config.backtest = {
   daterange: 'scan',
-// daterange: {
-//   from: "2018-03-01",
-//   to: "2018-04-28"
-//},
+  // daterange: {
+  //   from: "2018-03-01",
+  //   to: "2018-04-28"
+  //},
   batchSize: 50
 }
 
@@ -426,9 +440,18 @@ config.TSI = {
 
 // Ultimate Oscillator Settings
 config.UO = {
-  first: {weight: 4, period: 7},
-  second: {weight: 2, period: 14},
-  third: {weight: 1, period: 28},
+  first: {
+    weight: 4,
+    period: 7
+  },
+  second: {
+    weight: 2,
+    period: 14
+  },
+  third: {
+    weight: 1,
+    period: 28
+  },
   thresholds: {
     low: 30,
     high: 70,
@@ -440,13 +463,13 @@ config.UO = {
 
 // CCI Settings
 config.CCI = {
-    constant: 0.015, // constant multiplier. 0.015 gets to around 70% fit
-    history: 90, // history size, make same or smaller than history
-    thresholds: {
-        up: 100, // fixed values for overbuy upward trajectory
-        down: -100, // fixed value for downward trajectory
-        persistence: 0 // filter spikes by adding extra filters candles
-    }
+  constant: 0.015, // constant multiplier. 0.015 gets to around 70% fit
+  history: 90, // history size, make same or smaller than history
+  thresholds: {
+    up: 100, // fixed values for overbuy upward trajectory
+    down: -100, // fixed value for downward trajectory
+    persistence: 0 // filter spikes by adding extra filters candles
+  }
 };
 
 // StochRSI settings
